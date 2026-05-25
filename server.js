@@ -31,6 +31,29 @@ const MODEL_MAPPING = {
   'gemini-pro': 'deepseek-ai/deepseek-v4-pro' 
 };
 
+// Rate limit queue
+let requestQueue = Promise.resolve();
+const RETRY_DELAYS = [1000, 3000, 7000]; // ms between retries
+
+async function nimRequestWithRetry(url, payload, headers) {
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      const res = await axios.post(url, payload, { headers, responseType: payload.stream ? 'stream' : 'json' });
+      return res;
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 429 && attempt < RETRY_DELAYS.length) {
+        const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '0') * 1000;
+        const delay = retryAfter || RETRY_DELAYS[attempt];
+        console.log(`Rate limited. Retrying in ${delay}ms (attempt ${attempt + 1})`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
@@ -101,14 +124,15 @@ app.post('/v1/chat/completions', async (req, res) => {
       stream: stream || false
     };
     
-    // Make request to NVIDIA NIM API
-    const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
-      headers: {
-        'Authorization': `Bearer ${NIM_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      responseType: stream ? 'stream' : 'json'
-    });
+    // Make request to NVIDIA NIM API (with retry on 429)
+    const headers = {
+      'Authorization': `Bearer ${NIM_API_KEY}`,
+      'Content-Type': 'application/json'
+    };
+
+    let response;
+    requestQueue = requestQueue.then(() => nimRequestWithRetry(`${NIM_API_BASE}/chat/completions`, nimRequest, headers));
+    response = await requestQueue;
     
     if (stream) {
       // Handle streaming response with reasoning
@@ -216,11 +240,16 @@ app.post('/v1/chat/completions', async (req, res) => {
   } catch (error) {
     console.error('Proxy error:', error.message);
     
-    res.status(error.response?.status || 500).json({
+    const status = error.response?.status || 500;
+    const message = status === 429
+      ? 'NVIDIA NIM rate limit reached. Please wait a moment and try again.'
+      : error.message || 'Internal server error';
+
+    res.status(status).json({
       error: {
-        message: error.message || 'Internal server error',
-        type: 'invalid_request_error',
-        code: error.response?.status || 500
+        message,
+        type: status === 429 ? 'rate_limit_error' : 'invalid_request_error',
+        code: status
       }
     });
   }
