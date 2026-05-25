@@ -14,10 +14,6 @@ app.use(express.json());
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// MiniMax direct API configuration
-const MINIMAX_API_BASE = 'https://api.minimax.io/v1';
-const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY;
-
 // 🔥 REASONING DISPLAY TOGGLE - Shows/hides reasoning in output
 const SHOW_REASONING = false; // Set to true to show reasoning with <think> tags
 
@@ -34,12 +30,6 @@ const MODEL_MAPPING = {
   'claude-3-sonnet': 'openai/gpt-oss-20b',
   'gemini-pro': 'deepseek-ai/deepseek-v4-pro',
   'minimax': 'minimaxai/minimax-m2.7'
-};
-
-// MiniMax direct model mapping (routes to api.minimax.io instead of NIM)
-const MINIMAX_MODEL_MAPPING = {
-  'minimax-her': 'MiniMax-M2-her',
-  'minimax-m2':  'MiniMax-M2.7'
 };
 
 // Health check endpoint
@@ -72,13 +62,8 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const { model, messages, temperature, max_tokens, stream } = req.body;
     
-    // Determine if this should route to MiniMax or NIM
-    const isMinimaxRoute = !!MINIMAX_MODEL_MAPPING[model];
-    const API_BASE = isMinimaxRoute ? MINIMAX_API_BASE : NIM_API_BASE;
-    const API_KEY  = isMinimaxRoute ? MINIMAX_API_KEY  : NIM_API_KEY;
-
     // Smart model selection with fallback
-    let nimModel = isMinimaxRoute ? MINIMAX_MODEL_MAPPING[model] : MODEL_MAPPING[model];
+    let nimModel = MODEL_MAPPING[model];
     if (!nimModel) {
       try {
         await axios.post(`${NIM_API_BASE}/chat/completions`, {
@@ -121,9 +106,9 @@ app.post('/v1/chat/completions', async (req, res) => {
     const nimFetch = async (retries = 4, delay = 1000) => {
       for (let i = 0; i <= retries; i++) {
         try {
-          return await axios.post(`${API_BASE}/chat/completions`, nimRequest, {
+          return await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
             headers: {
-              'Authorization': `Bearer ${API_KEY}`,
+              'Authorization': `Bearer ${NIM_API_KEY}`,
               'Content-Type': 'application/json'
             },
             responseType: stream ? 'stream' : 'json'
