@@ -28,31 +28,8 @@ const MODEL_MAPPING = {
   'gpt-4o': 'deepseek-ai/deepseek-v3.1',
   'claude-3-opus': 'openai/gpt-oss-120b',
   'claude-3-sonnet': 'openai/gpt-oss-20b',
-  'gemini-pro': 'deepseek-ai/deepseek-v4-pro' 
+  'gemini-pro': 'deepseek-ai/deepseek-v4-pro'
 };
-
-// Rate limit queue
-let requestQueue = Promise.resolve();
-const RETRY_DELAYS = [1000, 3000, 7000]; // ms between retries
-
-async function nimRequestWithRetry(url, payload, headers) {
-  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
-    try {
-      const res = await axios.post(url, payload, { headers, responseType: payload.stream ? 'stream' : 'json' });
-      return res;
-    } catch (err) {
-      const status = err.response?.status;
-      if (status === 429 && attempt < RETRY_DELAYS.length) {
-        const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '0') * 1000;
-        const delay = retryAfter || RETRY_DELAYS[attempt];
-        console.log(`Rate limited. Retrying in ${delay}ms (attempt ${attempt + 1})`);
-        await new Promise(r => setTimeout(r, delay));
-      } else {
-        throw err;
-      }
-    }
-  }
-}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -124,15 +101,33 @@ app.post('/v1/chat/completions', async (req, res) => {
       stream: stream || false
     };
     
-    // Make request to NVIDIA NIM API (with retry on 429)
-    const headers = {
-      'Authorization': `Bearer ${NIM_API_KEY}`,
-      'Content-Type': 'application/json'
+    // Retry helper with exponential backoff for 429s
+    const nimFetch = async (retries = 4, delay = 1000) => {
+      for (let i = 0; i <= retries; i++) {
+        try {
+          return await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
+            headers: {
+              'Authorization': `Bearer ${NIM_API_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            responseType: stream ? 'stream' : 'json'
+          });
+        } catch (err) {
+          const status = err.response?.status;
+          if (status === 429 && i < retries) {
+            const retryAfter = parseInt(err.response?.headers?.['retry-after'] || 0) * 1000;
+            const wait = retryAfter || delay * Math.pow(2, i);
+            console.warn(`429 rate limited. Retrying in ${wait}ms... (attempt ${i + 1}/${retries})`);
+            await new Promise(r => setTimeout(r, wait));
+          } else {
+            throw err;
+          }
+        }
+      }
     };
 
-    let response;
-    requestQueue = requestQueue.then(() => nimRequestWithRetry(`${NIM_API_BASE}/chat/completions`, nimRequest, headers));
-    response = await requestQueue;
+    // Make request to NVIDIA NIM API
+    const response = await nimFetch();
     
     if (stream) {
       // Handle streaming response with reasoning
@@ -240,16 +235,11 @@ app.post('/v1/chat/completions', async (req, res) => {
   } catch (error) {
     console.error('Proxy error:', error.message);
     
-    const status = error.response?.status || 500;
-    const message = status === 429
-      ? 'NVIDIA NIM rate limit reached. Please wait a moment and try again.'
-      : error.message || 'Internal server error';
-
-    res.status(status).json({
+    res.status(error.response?.status || 500).json({
       error: {
-        message,
-        type: status === 429 ? 'rate_limit_error' : 'invalid_request_error',
-        code: status
+        message: error.message || 'Internal server error',
+        type: 'invalid_request_error',
+        code: error.response?.status || 500
       }
     });
   }
