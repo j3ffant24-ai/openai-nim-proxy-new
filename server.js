@@ -92,6 +92,9 @@ app.post('/v1/chat/completions', async (req, res) => {
       }
     }
     
+    // Force streaming always — keeps Render connection alive, prevents 504
+    const useStream = true;
+
     // Transform OpenAI request to NIM format
     const nimRequest = {
       model: nimModel,
@@ -99,7 +102,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       temperature: temperature || 0.6,
       max_tokens: max_tokens || 9024,
       extra_body: ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : undefined,
-      stream: stream || false
+      stream: useStream
     };
     
     // Retry helper with exponential backoff for 429s
@@ -111,7 +114,8 @@ app.post('/v1/chat/completions', async (req, res) => {
               'Authorization': `Bearer ${NIM_API_KEY}`,
               'Content-Type': 'application/json'
             },
-            responseType: stream ? 'stream' : 'json'
+            responseType: 'stream',
+            timeout: 120000 // 2 min timeout
           });
         } catch (err) {
           const status = err.response?.status;
@@ -131,106 +135,79 @@ app.post('/v1/chat/completions', async (req, res) => {
     const response = await nimFetch();
     
     if (stream) {
-      // Handle streaming response with reasoning
+      // Pass stream directly to client
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      
+
       let buffer = '';
       let reasoningStarted = false;
-      
+
       response.data.on('data', (chunk) => {
         buffer += chunk.toString();
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-        
+
         lines.forEach(line => {
           if (line.startsWith('data: ')) {
-            if (line.includes('[DONE]')) {
-              res.write(line + '\n');
-              return;
-            }
-            
+            if (line.includes('[DONE]')) { res.write(line + '\n'); return; }
             try {
               const data = JSON.parse(line.slice(6));
               if (data.choices?.[0]?.delta) {
                 const reasoning = data.choices[0].delta.reasoning_content;
                 const content = data.choices[0].delta.content;
-                
                 if (SHOW_REASONING) {
-                  let combinedContent = '';
-                  
-                  if (reasoning && !reasoningStarted) {
-                    combinedContent = '<think>\n' + reasoning;
-                    reasoningStarted = true;
-                  } else if (reasoning) {
-                    combinedContent = reasoning;
-                  }
-                  
-                  if (content && reasoningStarted) {
-                    combinedContent += '</think>\n\n' + content;
-                    reasoningStarted = false;
-                  } else if (content) {
-                    combinedContent += content;
-                  }
-                  
-                  if (combinedContent) {
-                    data.choices[0].delta.content = combinedContent;
-                    delete data.choices[0].delta.reasoning_content;
-                  }
+                  let combined = '';
+                  if (reasoning && !reasoningStarted) { combined = '<think>\n' + reasoning; reasoningStarted = true; }
+                  else if (reasoning) { combined = reasoning; }
+                  if (content && reasoningStarted) { combined += '</think>\n\n' + content; reasoningStarted = false; }
+                  else if (content) { combined += content; }
+                  if (combined) { data.choices[0].delta.content = combined; delete data.choices[0].delta.reasoning_content; }
                 } else {
-                  if (content) {
-                    data.choices[0].delta.content = content;
-                  } else {
-                    data.choices[0].delta.content = '';
-                  }
+                  data.choices[0].delta.content = content || '';
                   delete data.choices[0].delta.reasoning_content;
                 }
               }
               res.write(`data: ${JSON.stringify(data)}\n\n`);
-            } catch (e) {
-              res.write(line + '\n');
-            }
+            } catch (e) { res.write(line + '\n'); }
           }
         });
       });
-      
       response.data.on('end', () => res.end());
-      response.data.on('error', (err) => {
-        console.error('Stream error:', err);
-        res.end();
-      });
+      response.data.on('error', (err) => { console.error('Stream error:', err); res.end(); });
+
     } else {
-      // Transform NIM response to OpenAI format with reasoning
-      const openaiResponse = {
+      // Client wants JSON — collect the stream and assemble it
+      let buffer = '', fullContent = '', fullReasoning = '', finishReason = '', promptTokens = 0, completionTokens = 0;
+
+      await new Promise((resolve, reject) => {
+        response.data.on('data', (chunk) => { buffer += chunk.toString(); });
+        response.data.on('end', () => {
+          buffer.split('\n').forEach(line => {
+            if (!line.startsWith('data: ') || line.includes('[DONE]')) return;
+            try {
+              const data = JSON.parse(line.slice(6));
+              fullContent   += data.choices?.[0]?.delta?.content           || '';
+              fullReasoning += data.choices?.[0]?.delta?.reasoning_content || '';
+              if (data.choices?.[0]?.finish_reason) finishReason = data.choices[0].finish_reason;
+              if (data.usage) { promptTokens = data.usage.prompt_tokens || 0; completionTokens = data.usage.completion_tokens || 0; }
+            } catch (e) {}
+          });
+          resolve();
+        });
+        response.data.on('error', reject);
+      });
+
+      if (SHOW_REASONING && fullReasoning) fullContent = '<think>\n' + fullReasoning + '\n</think>\n\n' + fullContent;
+
+      res.json({
         id: `chatcmpl-${Date.now()}`,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model: model,
-        choices: response.data.choices.map(choice => {
-          let fullContent = choice.message?.content || '';
-          
-          if (SHOW_REASONING && choice.message?.reasoning_content) {
-            fullContent = '<think>\n' + choice.message.reasoning_content + '\n</think>\n\n' + fullContent;
-          }
-          
-          return {
-            index: choice.index,
-            message: {
-              role: choice.message.role,
-              content: fullContent
-            },
-            finish_reason: choice.finish_reason
-          };
-        }),
-        usage: response.data.usage || {
-          prompt_tokens: 0,
-          completion_tokens: 0,
-          total_tokens: 0
-        }
-      };
-      
-      res.json(openaiResponse);
+        model,
+        choices: [{ index: 0, message: { role: 'assistant', content: fullContent }, finish_reason: finishReason }],
+        usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens }
+      });
     }
     
   } catch (error) {
