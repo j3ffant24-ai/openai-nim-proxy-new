@@ -115,7 +115,7 @@ app.post('/v1/chat/completions', async (req, res) => {
               'Content-Type': 'application/json'
             },
             responseType: 'stream',
-            timeout: 120000 // 2 min timeout
+            timeout: 0 // no timeout — streaming keeps Render alive
           });
         } catch (err) {
           const status = err.response?.status;
