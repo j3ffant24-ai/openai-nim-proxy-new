@@ -106,7 +106,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     };
     
     // Retry helper with exponential backoff for 429s
-    const nimFetch = async (retries = 4, delay = 1000) => {
+    const nimFetch = async (retries = 6, delay = 3000) => {
       for (let i = 0; i <= retries; i++) {
         try {
           return await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
@@ -119,10 +119,10 @@ app.post('/v1/chat/completions', async (req, res) => {
           });
         } catch (err) {
           const status = err.response?.status;
-          if (status === 429 && i < retries) {
+          if ((status === 429 || status === 504) && i < retries) {
             const retryAfter = parseInt(err.response?.headers?.['retry-after'] || 0) * 1000;
             const wait = retryAfter || delay * Math.pow(2, i);
-            console.warn(`429 rate limited. Retrying in ${wait}ms... (attempt ${i + 1}/${retries})`);
+            console.warn(`${status} error. Retrying in ${wait}ms... (attempt ${i + 1}/${retries})`);
             await new Promise(r => setTimeout(r, wait));
           } else {
             throw err;
