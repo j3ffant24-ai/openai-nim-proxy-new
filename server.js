@@ -60,7 +60,7 @@ app.get('/v1/models', (req, res) => {
 // Chat completions endpoint (main proxy)
 app.post('/v1/chat/completions', async (req, res) => {
   try {
-    const { model, messages, temperature, max_tokens, stream } = req.body;
+    const { model, messages, temperature, max_tokens, stream, frequency_penalty, presence_penalty, top_p, repetition_penalty } = req.body;
     
     // Smart model selection with fallback
     let nimModel = MODEL_MAPPING[model];
@@ -101,7 +101,14 @@ app.post('/v1/chat/completions', async (req, res) => {
       messages: messages,
       temperature: temperature || 0.6,
       max_tokens: max_tokens || 9024,
-      extra_body: ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : undefined,
+      // Anti-repetition params — prevents echoing the greeting/first message
+      frequency_penalty: frequency_penalty ?? 0.4,
+      presence_penalty: presence_penalty ?? 0.4,
+      top_p: top_p ?? 0.9,
+      extra_body: {
+        ...(repetition_penalty ? { repetition_penalty } : {}),
+        ...(ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : {})
+      },
       stream: useStream
     };
     
