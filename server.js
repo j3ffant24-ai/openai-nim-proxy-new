@@ -70,7 +70,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       console.warn(`[MODEL] No mapping found for "${model}" — using default fallback`);
       nimModel = 'nvidia/llama-3.1-nemotron-ultra-253b-v1';
     }
-    console.log(`[MODEL] Routing to NIM model: "${nimModel}"`);
+    console.log(`[REQUEST] Sending to NIM:`, JSON.stringify(nimRequest, null, 2));
     if (!nimModel) {
       try {
         await axios.post(`${NIM_API_BASE}/chat/completions`, {
@@ -102,21 +102,22 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Force streaming always — keeps Render connection alive, prevents 504
     const useStream = true;
 
-    // Transform OpenAI request to NIM format
+    // Whitelist only NIM-supported params — strips WyvernChat extras that cause 400
     const nimRequest = {
       model: nimModel,
       messages: messages,
-      temperature: temperature || 0.6,
-      max_tokens: max_tokens || 9024,
-      // Anti-repetition params — prevents echoing the greeting/first message
-      frequency_penalty: frequency_penalty ?? 0.4,
-      presence_penalty: presence_penalty ?? 0.4,
-      top_p: top_p ?? 0.9,
+      stream: useStream,
+      ...(temperature        !== undefined && { temperature }),
+      ...(max_tokens         !== undefined && { max_tokens }),
+      ...(top_p              !== undefined && { top_p }),
+      ...(frequency_penalty  !== undefined && { frequency_penalty }),
+      ...(presence_penalty   !== undefined && { presence_penalty }),
+      ...(req.body.stop      !== undefined && { stop: req.body.stop }),
+      ...(req.body.n         !== undefined && { n: req.body.n }),
       extra_body: {
         ...(repetition_penalty ? { repetition_penalty } : {}),
         ...(ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : {})
-      },
-      stream: useStream
+      }
     };
     
     // Retry helper with exponential backoff for 429s
