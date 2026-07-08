@@ -63,7 +63,14 @@ app.post('/v1/chat/completions', async (req, res) => {
     const { model, messages, temperature, max_tokens, stream, frequency_penalty, presence_penalty, top_p, repetition_penalty } = req.body;
     
     // Smart model selection with fallback
+    console.log(`[MODEL] WyvernChat requested: "${model}"`);
     let nimModel = MODEL_MAPPING[model];
+
+    if (!nimModel) {
+      console.warn(`[MODEL] No mapping found for "${model}" — using default fallback`);
+      nimModel = 'nvidia/llama-3.1-nemotron-ultra-253b-v1';
+    }
+    console.log(`[MODEL] Routing to NIM model: "${nimModel}"`);
     if (!nimModel) {
       try {
         await axios.post(`${NIM_API_BASE}/chat/completions`, {
