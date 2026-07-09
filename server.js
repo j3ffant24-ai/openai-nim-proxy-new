@@ -16,14 +16,14 @@ const SHOW_REASONING     = process.env.SHOW_REASONING !== 'false';
 // ─── Model Mapping ────────────────────────────────────────────────────────────
 // Janitor AI / WyvernChat model name  →  NVIDIA NIM model string
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo':  'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  'gpt-4':          'qwen/qwen3-coder-480b-a35b-instruct',
-  'gpt-4-turbo':    'moonshotai/kimi-k2.6',
-  'gpt-4o':         'deepseek-ai/deepseek-v3.1',
-  'claude-3-opus':  'nvidia/llama-3.3-nemotron-super-49b-v1',
-  'claude-3-sonnet':'nvidia/mistral-nemo-minitron-8b-8k-instruct',
-  'gemini-pro':     'deepseek-ai/deepseek-v4-pro',
-  'minimax':        'minimaxai/minimax-m2.7'
+  'gpt-3.5-turbo':  'nvidia/llama-3.1-nemotron-ultra-253b-v1', // ✅ confirmed
+  'gpt-4':          'qwen/qwen3-coder-480b-a35b-instruct',      // ✅ confirmed
+  'gpt-4-turbo':    'moonshotai/kimi-k2-instruct',              // ✅ confirmed (streaming-safe)
+  'gpt-4o':         'deepseek-ai/deepseek-v4-flash',            // ✅ confirmed (v3.1 doesn't exist)
+  'claude-3-opus':  'openai/gpt-oss-120b',                      // ✅ confirmed
+  'claude-3-sonnet':'openai/gpt-oss-20b',                       // ✅ confirmed
+  'gemini-pro':     'deepseek-ai/deepseek-v4-pro',              // ✅ confirmed
+  'minimax':        'minimaxai/minimax-m2.7'                    // ✅ confirmed
 };
 const DEFAULT_MODEL = 'nvidia/llama-3.1-nemotron-ultra-253b-v1'; // fallback
 
