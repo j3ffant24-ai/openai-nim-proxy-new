@@ -63,14 +63,9 @@ app.post('/v1/chat/completions', async (req, res) => {
     const { model, messages, temperature, max_tokens, stream, frequency_penalty, presence_penalty, top_p, repetition_penalty } = req.body;
     
     // Smart model selection with fallback
-    console.log(`[MODEL] WyvernChat requested: "${model}"`);
-    let nimModel = MODEL_MAPPING[model];
-
-    if (!nimModel) {
-      console.warn(`[MODEL] No mapping found for "${model}" — using default fallback`);
-      nimModel = 'nvidia/llama-3.1-nemotron-ultra-253b-v1';
-    }
-    console.log(`[REQUEST] Sending to NIM:`, JSON.stringify(nimRequest, null, 2));
+    console.log(`[PROXY] Incoming model: "${model}"`);
+    let nimModel = MODEL_MAPPING[model] || MODEL_MAPPING['gpt-3.5-turbo']; // fallback to Nemotron
+    if (!MODEL_MAPPING[model]) console.warn(`[PROXY] Unknown model "${model}", falling back to Nemotron 253B`);
     if (!nimModel) {
       try {
         await axios.post(`${NIM_API_BASE}/chat/completions`, {
@@ -102,29 +97,28 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Force streaming always — keeps Render connection alive, prevents 504
     const useStream = true;
 
-    // Whitelist only NIM-supported params — strips WyvernChat extras that cause 400
+    // Transform OpenAI request to NIM format
     const nimRequest = {
       model: nimModel,
       messages: messages,
-      stream: useStream,
-      ...(temperature        !== undefined && { temperature }),
-      ...(max_tokens         !== undefined && { max_tokens }),
-      ...(top_p              !== undefined && { top_p }),
-      ...(frequency_penalty  !== undefined && { frequency_penalty }),
-      ...(presence_penalty   !== undefined && { presence_penalty }),
-      ...(req.body.stop      !== undefined && { stop: req.body.stop }),
-      ...(req.body.n         !== undefined && { n: req.body.n }),
+      temperature: temperature || 0.6,
+      max_tokens: max_tokens || 9024,
+      // Anti-repetition params — prevents echoing the greeting/first message
+      frequency_penalty: frequency_penalty ?? 0.4,
+      presence_penalty: presence_penalty ?? 0.4,
+      top_p: top_p ?? 0.9,
       extra_body: {
         ...(repetition_penalty ? { repetition_penalty } : {}),
         ...(ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : {})
-      }
+      },
+      stream: useStream
     };
     
     // Retry helper with exponential backoff for 429s
-    const nimFetch = async (retries = 6, delay = 3000) => {
+    const nimFetch = async (payload, retries = 6, delay = 3000) => {
       for (let i = 0; i <= retries; i++) {
         try {
-          return await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
+          return await axios.post(`${NIM_API_BASE}/chat/completions`, payload, {
             headers: {
               'Authorization': `Bearer ${NIM_API_KEY}`,
               'Content-Type': 'application/json'
@@ -147,7 +141,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     };
 
     // Make request to NVIDIA NIM API
-    const response = await nimFetch();
+    const response = await nimFetch(nimRequest);
     
     if (stream) {
       // Pass stream directly to client
