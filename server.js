@@ -60,7 +60,7 @@ app.get('/v1/models', (req, res) => {
 // Chat completions endpoint (main proxy)
 app.post('/v1/chat/completions', async (req, res) => {
   try {
-    const { model, messages, temperature, max_tokens, stream, top_p, stop } = req.body;
+    const { model, messages, temperature, max_tokens, stream, frequency_penalty, presence_penalty, top_p, repetition_penalty } = req.body;
     
     // Smart model selection with fallback
     let nimModel = MODEL_MAPPING[model];
@@ -95,14 +95,20 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Force streaming always — keeps Render connection alive, prevents 504
     const useStream = true;
 
-    // Strict whitelist — NIM rejects any unknown params (top_k, min_p, rep pen, etc.)
+    // Transform OpenAI request to NIM format
     const nimRequest = {
       model: nimModel,
       messages: messages,
       temperature: temperature || 0.6,
       max_tokens: max_tokens || 9024,
-      top_p: top_p || 0.9,
-      ...(stop ? { stop } : {}),
+      // Anti-repetition params — prevents echoing the greeting/first message
+      frequency_penalty: frequency_penalty ?? 0.4,
+      presence_penalty: presence_penalty ?? 0.4,
+      top_p: top_p ?? 0.9,
+      extra_body: {
+        ...(repetition_penalty ? { repetition_penalty } : {}),
+        ...(ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : {})
+      },
       stream: useStream
     };
     
@@ -126,10 +132,6 @@ app.post('/v1/chat/completions', async (req, res) => {
             console.warn(`${status} error. Retrying in ${wait}ms... (attempt ${i + 1}/${retries})`);
             await new Promise(r => setTimeout(r, wait));
           } else {
-            // Log the full NIM error so we can see exactly what's wrong
-            const nimError = err.response?.data;
-            console.error('NIM ERROR:', JSON.stringify(nimError, null, 2));
-            console.error('NIM REQUEST SENT:', JSON.stringify(nimRequest, null, 2));
             throw err;
           }
         }
