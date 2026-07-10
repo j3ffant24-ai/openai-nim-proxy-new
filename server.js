@@ -57,6 +57,17 @@ app.get('/v1/models', (req, res) => {
   });
 });
 
+// Models endpoint — required by WyvernChat and most OpenAI-compatible frontends
+app.get('/v1/models', (req, res) => {
+  const models = Object.keys(MODEL_MAPPING).map(id => ({
+    id,
+    object: 'model',
+    created: 1700000000,
+    owned_by: 'nvidia-nim-proxy'
+  }));
+  res.json({ object: 'list', data: models });
+});
+
 // Chat completions endpoint (main proxy)
 app.post('/v1/chat/completions', async (req, res) => {
   try {
