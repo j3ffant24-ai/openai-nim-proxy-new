@@ -126,6 +126,10 @@ app.post('/v1/chat/completions', async (req, res) => {
             console.warn(`${status} error. Retrying in ${wait}ms... (attempt ${i + 1}/${retries})`);
             await new Promise(r => setTimeout(r, wait));
           } else {
+            // Log the full NIM error so we can see exactly what's wrong
+            const nimError = err.response?.data;
+            console.error('NIM ERROR:', JSON.stringify(nimError, null, 2));
+            console.error('NIM REQUEST SENT:', JSON.stringify(nimRequest, null, 2));
             throw err;
           }
         }
