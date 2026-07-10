@@ -101,12 +101,10 @@ app.post('/v1/chat/completions', async (req, res) => {
       messages: messages,
       temperature: temperature || 0.6,
       max_tokens: max_tokens || 9024,
-      // Anti-repetition params — prevents echoing the greeting/first message
-      frequency_penalty: frequency_penalty ?? 0.4,
-      presence_penalty: presence_penalty ?? 0.4,
       top_p: top_p ?? 0.9,
+      // NIM does NOT support frequency_penalty or presence_penalty — omit them
       extra_body: {
-        ...(repetition_penalty ? { repetition_penalty } : {}),
+        ...(repetition_penalty ? { repetition_penalty } : { repetition_penalty: 1.08 }),
         ...(ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : {})
       },
       stream: useStream
