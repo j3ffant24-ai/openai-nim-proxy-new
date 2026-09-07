@@ -22,15 +22,49 @@ const ENABLE_THINKING_MODE = false; // Set to true to enable chat_template_kwarg
 
 // Model mapping (adjust based on available NIM models)
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  'gpt-4': 'qwen/qwen3-coder-480b-a35b-instruct',
-  'gpt-4-turbo': 'z-ai/glm-5.2',
-  'gpt-4o': 'deepseek-ai/deepseek-v3.1',
-  'claude-3-opus': 'openai/gpt-oss-120b',
-  'claude-3-sonnet': 'openai/gpt-oss-20b',
-  'gemini-pro': 'deepseek-ai/deepseek-v4-pro',
-  'minimax': 'minimaxai/minimax-m2.7'
+  'gpt-3.5-turbo': 'nvidia/nemotron-3-super-120b-a12b',
+  'gpt-4':         'nvidia/nemotron-3-ultra-550b-a55b',
+  'gpt-4-turbo':   'nvidia/nemotron-3-ultra-550b-a55b',
+  'gpt-4o':        'nvidia/nemotron-3-ultra-550b-a55b',
+  'claude-3-opus': 'nvidia/nemotron-3-ultra-550b-a55b',
+  'claude-3-sonnet':'nvidia/nemotron-3-super-120b-a12b',
+  'gemini-pro':    'nvidia/nemotron-3-super-120b-a12b',
+  'minimax':       'nvidia/nemotron-3-super-120b-a12b'
 };
+
+// Trim old messages to avoid NIM 413 — keeps system prompt + recent history
+const trimMessages = (messages, maxTokens = 24000) => {
+  const estimate = msgs => msgs.reduce((sum, m) => sum + Math.ceil((m.content || '').length / 4), 0);
+  if (estimate(messages) <= maxTokens) return messages;
+  const system = messages.filter(m => m.role === 'system');
+  const rest   = messages.filter(m => m.role !== 'system');
+  while (rest.length > 1 && estimate([...system, ...rest]) > maxTokens) rest.shift();
+  console.warn(`Trimmed messages to ${estimate([...system, ...rest])} estimated tokens`);
+  return [...system, ...rest];
+};
+
+// Test all mapped models — visit /test-models to see which ones work with your key
+app.get('/test-models', async (req, res) => {
+  const results = {};
+  for (const [alias, nimModel] of Object.entries(MODEL_MAPPING)) {
+    try {
+      const r = await axios.post(`${NIM_API_BASE}/chat/completions`, {
+        model: nimModel,
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1,
+        stream: false
+      }, {
+        headers: { 'Authorization': `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
+        timeout: 15000,
+        validateStatus: () => true
+      });
+      results[alias] = { nim_model: nimModel, status: r.status, ok: r.status < 400 };
+    } catch (err) {
+      results[alias] = { nim_model: nimModel, status: 'timeout', ok: false };
+    }
+  }
+  res.json(results);
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -93,12 +127,12 @@ app.post('/v1/chat/completions', async (req, res) => {
       
       if (!nimModel) {
         const modelLower = model.toLowerCase();
-        if (modelLower.includes('gpt-4') || modelLower.includes('claude-opus') || modelLower.includes('405b')) {
-          nimModel = 'meta/llama-3.1-405b-instruct';
-        } else if (modelLower.includes('claude') || modelLower.includes('gemini') || modelLower.includes('70b')) {
-          nimModel = 'meta/llama-3.1-70b-instruct';
+        if (modelLower.includes('gpt-4') || modelLower.includes('claude-opus') || modelLower.includes('405b') || modelLower.includes('large')) {
+          nimModel = 'nvidia/nemotron-3-ultra-550b-a55b';
+        } else if (modelLower.includes('claude') || modelLower.includes('gemini') || modelLower.includes('70b') || modelLower.includes('medium')) {
+          nimModel = 'deepseek-ai/deepseek-v4-flash';
         } else {
-          nimModel = 'meta/llama-3.1-8b-instruct';
+          nimModel = 'nvidia/nemotron-3-super-120b-a12b';
         }
       }
     }
@@ -106,22 +140,23 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Force streaming always — keeps Render connection alive, prevents 504
     const useStream = true;
 
-    // Transform OpenAI request to NIM format
+    // Build NIM request — only include optional params if actually set
     const nimRequest = {
       model: nimModel,
-      messages: messages,
+      messages: trimMessages(messages),
       temperature: temperature || 0.6,
-      max_tokens: max_tokens || 9024,
-      // Anti-repetition params — prevents echoing the greeting/first message
-      frequency_penalty: frequency_penalty ?? 0.4,
-      presence_penalty: presence_penalty ?? 0.4,
-      top_p: top_p ?? 0.9,
-      extra_body: {
-        ...(repetition_penalty ? { repetition_penalty } : {}),
-        ...(ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : {})
-      },
+      max_tokens: max_tokens || 2048,
       stream: useStream
     };
+
+    // Only add penalty params if the client sent them (avoids 400 on strict models)
+    if (frequency_penalty != null) nimRequest.frequency_penalty = frequency_penalty;
+    if (presence_penalty  != null) nimRequest.presence_penalty  = presence_penalty;
+    if (top_p             != null) nimRequest.top_p             = top_p;
+    if (repetition_penalty != null) nimRequest.repetition_penalty = repetition_penalty;
+
+    // Only add extra_body if thinking mode is actually on
+    if (ENABLE_THINKING_MODE) nimRequest.extra_body = { chat_template_kwargs: { thinking: true } };
     
     // Retry helper with exponential backoff for 429s
     const nimFetch = async (retries = 6, delay = 3000) => {
@@ -160,6 +195,9 @@ app.post('/v1/chat/completions', async (req, res) => {
 
       let buffer = '';
       let reasoningStarted = false;
+      let tokenCount = 0;
+      const MAX_STREAM_TOKENS = 2500;
+      let streamDone = false;
 
       response.data.on('data', (chunk) => {
         buffer += chunk.toString();
@@ -186,7 +224,14 @@ app.post('/v1/chat/completions', async (req, res) => {
                   delete data.choices[0].delta.reasoning_content;
                 }
               }
+              if (streamDone) return;
               res.write(`data: ${JSON.stringify(data)}\n\n`);
+              tokenCount += (data.choices?.[0]?.delta?.content || '').length / 4;
+              if (tokenCount > MAX_STREAM_TOKENS) {
+                streamDone = true;
+                if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+                response.data.destroy(); // stop NIM from sending more
+              }
             } catch (e) { res.write(line + '\n'); }
           }
         });
@@ -230,14 +275,18 @@ app.post('/v1/chat/completions', async (req, res) => {
     
   } catch (error) {
     console.error('Proxy error:', error.message);
-    
-    res.status(error.response?.status || 500).json({
-      error: {
-        message: error.message || 'Internal server error',
-        type: 'invalid_request_error',
-        code: error.response?.status || 500
-      }
-    });
+    if (res.headersSent) {
+      // Stream already started — just close it cleanly
+      if (!res.writableEnded) res.end();
+    } else {
+      res.status(error.response?.status || 500).json({
+        error: {
+          message: error.message || 'Internal server error',
+          type: 'invalid_request_error',
+          code: error.response?.status || 500
+        }
+      });
+    }
   }
 });
 
