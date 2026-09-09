@@ -22,11 +22,11 @@ const ENABLE_THINKING_MODE = false; // Set to true for models that support think
 // Model mapping
 const MODEL_MAPPING = {
   'gpt-3.5-turbo': 'nvidia/nemotron-3-super-120b-a12b',
-  'gpt-4':         'nvidia/nemotron-3-ultra-550b-a55b',
+  'gpt-4':         'deepseek-ai/deepseek-v4-flash-0731',
   'gpt-4-turbo':   'moonshotai/kimi-k3',
-  'gpt-4o':        'nvidia/nemotron-3-ultra-550b-a55b',
-  'claude-3-opus': 'nvidia/nemotron-3-ultra-550b-a55b',
-  'claude-3-sonnet':'nvidia/nemotron-3-super-120b-a12b',
+  'gpt-4o':        'deepseek-ai/deepseek-v4-flash-0731',
+  'claude-3-opus': 'deepseek-ai/deepseek-v4-pro-0813',
+  'claude-3-sonnet':'deepseek-ai/deepseek-v4-flash-0731',
   'gemini-pro':    'nvidia/nemotron-3-super-120b-a12b',
   'minimax':       'nvidia/nemotron-3-super-120b-a12b'
 };
@@ -126,7 +126,14 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (presence_penalty   != null) nimRequest.presence_penalty   = presence_penalty;
     if (top_p              != null) nimRequest.top_p              = top_p;
     nimRequest.repetition_penalty = repetition_penalty ?? 1.05;
-    if (ENABLE_THINKING_MODE) nimRequest.extra_body = { chat_template_kwargs: { thinking: true } };
+
+    // DeepSeek V4 dated models: temperature must be 1, thinking off for fast RP responses
+    if (nimModel.includes('deepseek-v4')) {
+      nimRequest.temperature = 1;
+      nimRequest.extra_body = { chat_template_kwargs: { thinking: false } };
+    } else if (ENABLE_THINKING_MODE) {
+      nimRequest.extra_body = { chat_template_kwargs: { thinking: true } };
+    }
 
     // Kimi K3 requires reasoning_effort — without it NIM returns 400
     if (nimModel === 'moonshotai/kimi-k3') nimRequest.reasoning_effort = 'medium';
