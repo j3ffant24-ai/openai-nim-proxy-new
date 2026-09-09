@@ -240,10 +240,9 @@ app.post('/v1/chat/completions', async (req, res) => {
             }
             if (streamDone) return;
             if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
-            const outContent = data.choices?.[0]?.delta?.content || '';
-            const outReason  = data.choices?.[0]?.delta?.reasoning_content || '';
-            tokenCount += (outContent + outReason).length / 4;
-            if (tokenCount > MAX_STREAM_TOKENS) {
+            charCount += (data.choices?.[0]?.delta?.content || '').length;
+            charCount += (data.choices?.[0]?.delta?.reasoning_content || '').length;
+            if (charCount > MAX_CHARS) {
               streamDone = true;
               if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
               response.data.destroy();
