@@ -21,14 +21,14 @@ const ENABLE_THINKING_MODE = false; // Set to true for models that support think
 
 // Model mapping
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'deepseek-ai/deepseek-v4-flash',
-  'gpt-4':         'deepseek-ai/deepseek-v4-flash',
+  'gpt-3.5-turbo': 'nvidia/nemotron-3-super-120b-a12b',
+  'gpt-4':         'nvidia/nemotron-3-ultra-550b-a55b',
   'gpt-4-turbo':   'moonshotai/kimi-k3',
-  'gpt-4o':        'deepseek-ai/deepseek-v4-flash',
-  'claude-3-opus': 'deepseek-ai/deepseek-v4-pro',
-  'claude-3-sonnet':'deepseek-ai/deepseek-v4-flash',
-  'gemini-pro':    'deepseek-ai/deepseek-v4-flash',
-  'minimax':       'deepseek-ai/deepseek-v4-flash'
+  'gpt-4o':        'nvidia/nemotron-3-ultra-550b-a55b',
+  'claude-3-opus': 'nvidia/nemotron-3-ultra-550b-a55b',
+  'claude-3-sonnet':'nvidia/nemotron-3-super-120b-a12b',
+  'gemini-pro':    'nvidia/nemotron-3-super-120b-a12b',
+  'minimax':       'nvidia/nemotron-3-super-120b-a12b'
 };
 
 // Trim old messages — keeps system prompt, drops oldest chat history
@@ -125,9 +125,11 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (frequency_penalty  != null) nimRequest.frequency_penalty  = frequency_penalty;
     if (presence_penalty   != null) nimRequest.presence_penalty   = presence_penalty;
     if (top_p              != null) nimRequest.top_p              = top_p;
-    // Default repetition penalty for DeepSeek — prevents runaway if client doesn't set one
     nimRequest.repetition_penalty = repetition_penalty ?? 1.05;
     if (ENABLE_THINKING_MODE) nimRequest.extra_body = { chat_template_kwargs: { thinking: true } };
+
+    // Kimi K3 requires reasoning_effort — without it NIM returns 400
+    if (nimModel === 'moonshotai/kimi-k3') nimRequest.reasoning_effort = 'medium';
 
     // Retry with exponential backoff for 429 and 504
     const nimFetch = async (retries = 6, delay = 3000) => {
