@@ -20,15 +20,16 @@ const SHOW_REASONING = false; // Set to true to show <think> tags in output
 const ENABLE_THINKING_MODE = false; // Set to true for models that support thinking
 
 // Model mapping
+// ✅ = confirmed working | ⏳ = timeout (NIM overloaded, try later)
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'nvidia/nemotron-3-super-120b-a12b',
-  'gpt-4':         'deepseek-ai/deepseek-v4-pro-0813',
-  'gpt-4-turbo':   'moonshotai/kimi-k3',
-  'gpt-4o':        'deepseek-ai/deepseek-v4-pro-0813',
-  'claude-3-opus': 'deepseek-ai/deepseek-v4-pro-0813',
-  'claude-3-sonnet':'deepseek-ai/deepseek-v4-flash-0731',
-  'gemini-pro':    'nvidia/nemotron-3-super-120b-a12b',
-  'minimax':       'nvidia/nemotron-3-super-120b-a12b'
+  'gpt-3.5-turbo': 'nvidia/nemotron-3-super-120b-a12b',  // ✅
+  'gpt-4':         'nvidia/nemotron-3-super-120b-a12b',  // ✅ swap to deepseek-ai/deepseek-v4-pro-0813 when NIM load drops
+  'gpt-4-turbo':   'nvidia/nemotron-3-super-120b-a12b',  // ✅ swap to moonshotai/kimi-k3 when NIM load drops
+  'gpt-4o':        'nvidia/nemotron-3-super-120b-a12b',  // ✅
+  'claude-3-opus': 'nvidia/nemotron-3-super-120b-a12b',  // ✅ swap to deepseek-ai/deepseek-v4-pro-0813 when NIM load drops
+  'claude-3-sonnet':'nvidia/nemotron-3-super-120b-a12b', // ✅ swap to deepseek-ai/deepseek-v4-flash-0731 when NIM load drops
+  'gemini-pro':    'nvidia/nemotron-3-super-120b-a12b',  // ✅
+  'minimax':       'nvidia/nemotron-3-super-120b-a12b'   // ✅
 };
 
 // Trim old messages — keeps system prompt, drops oldest chat history
@@ -213,6 +214,43 @@ app.post('/v1/chat/completions', async (req, res) => {
         });
       });
 
+      response.data.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        lines.forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          if (line.includes('[DONE]')) { if (!res.writableEnded) res.write(line + '\n'); return; }
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.choices?.[0]?.delta) {
+              const reasoning = data.choices[0].delta.reasoning_content;
+              const content   = data.choices[0].delta.content;
+              if (SHOW_REASONING) {
+                let combined = '';
+                if (reasoning && !reasoningStarted) { combined = '<think>\n' + reasoning; reasoningStarted = true; }
+                else if (reasoning) { combined = reasoning; }
+                if (content && reasoningStarted) { combined += '</think>\n\n' + content; reasoningStarted = false; }
+                else if (content) { combined += content; }
+                if (combined) { data.choices[0].delta.content = combined; delete data.choices[0].delta.reasoning_content; }
+              } else {
+                data.choices[0].delta.content = content || '';
+                delete data.choices[0].delta.reasoning_content;
+              }
+            }
+            if (streamDone) return;
+            if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
+            const outContent = data.choices?.[0]?.delta?.content || '';
+            const outReason  = data.choices?.[0]?.delta?.reasoning_content || '';
+            tokenCount += (outContent + outReason).length / 4;
+            if (tokenCount > MAX_STREAM_TOKENS) {
+              streamDone = true;
+              if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+              response.data.destroy();
+            }
+          } catch (e) { if (!res.writableEnded) res.write(line + '\n'); }
+        });
+      });
       response.data.on('end',  () => { if (!res.writableEnded) res.end(); });
       response.data.on('error', (err) => { console.error('Stream error:', err); if (!res.writableEnded) res.end(); });
 
