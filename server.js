@@ -24,7 +24,7 @@ const MODEL_MAPPING = {
   'gpt-4':         'deepseek/deepseek-v4-flash-0731',     // $0.05/M input — cheapest paid
   'gpt-4-turbo':   'deepseek/deepseek-v4-flash',          // $0.07/M input — #1 RP model
   'gpt-4o':        'deepseek/deepseek-v4-flash-0731',     // $0.05/M input — great value
-  'claude-3-opus': 'deepseek/deepseek-v4-pro-0813',       // Premium — 1.65T params
+  'claude-3-opus': 'deepseek/deepseek-v4-pro',            // Premium — 1.65T params
   'claude-3-sonnet':'deepseek/deepseek-r1',                // Reasoning model
   'gemini-pro':    'deepseek/deepseek-v4-flash:free',     // Free fallback
   'minimax':       'deepseek/deepseek-v4-flash:free'      // Free fallback
