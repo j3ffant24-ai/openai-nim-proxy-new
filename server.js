@@ -31,7 +31,7 @@ const MODEL_MAPPING = {
 };
 
 // Trim old messages — keeps system prompt + recent history
-const trimMessages = (messages, maxTokens = 16000) => {
+const trimMessages = (messages, maxTokens = 32000) => {
   const estimate = msgs => msgs.reduce((sum, m) => sum + Math.ceil((m.content || '').length / 4), 0);
   if (estimate(messages) <= maxTokens) return messages;
   const system = messages.filter(m => m.role === 'system');
@@ -108,7 +108,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const orRequest = {
       model: orModel,
-      messages: messages,
+      messages: trimMessages(messages),
       temperature: temperature || 0.7,
       max_tokens: max_tokens || 2048,
       stream: useStream
