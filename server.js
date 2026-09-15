@@ -16,18 +16,18 @@ const OR_KEY  = process.env.OPENROUTER_API_KEY;
 // 🔥 REASONING DISPLAY TOGGLE
 const SHOW_REASONING = false; // Set to true to show <think> tags in output
 
-// Model mapping
-// Free models (no credits needed): marked with :free suffix
-// Paid models draw from your credit balance
+// Model mapping — verified September 14, 2026
+// Free slots (no credits needed, 200 req/day, 20 RPM)
+// Paid slots draw from your credit balance
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'deepseek/deepseek-r1:free',            // Free — R1 full 671B model
-  'gpt-4':         'deepseek/deepseek-chat-v3-0324:free',   // Free — DeepSeek V3
-  'gpt-4-turbo':   'deepseek/deepseek-v4-flash-0731',       // Paid — cheapest, great RP
-  'gpt-4o':        'deepseek/deepseek-v4-flash',            // Paid — #1 RP model globally
-  'claude-3-opus': 'deepseek/deepseek-v4-pro',              // Paid — 1.65T premium
-  'claude-3-sonnet':'deepseek/deepseek-r1',                 // Paid — reasoning
-  'gemini-pro':    'deepseek/deepseek-r1:free',             // Free — R1 full 671B model
-  'minimax':       'deepseek/deepseek-chat-v3-0324:free'    // Free — DeepSeek V3
+  'gpt-3.5-turbo': 'nvidia/nemotron-3-ultra-550b-a55b:free', // Free — 550B, 1M ctx
+  'gpt-4':         'thinkingmachines/inkling:free',            // Free — quality #1, 1M ctx
+  'gpt-4-turbo':   'deepseek/deepseek-v4-flash-0731',         // Paid — cheapest DeepSeek
+  'gpt-4o':        'deepseek/deepseek-v4-flash',              // Paid — #1 RP model globally
+  'claude-3-opus': 'deepseek/deepseek-v4-pro',                // Paid — 1.65T premium
+  'claude-3-sonnet':'deepseek/deepseek-r1',                   // Paid — reasoning
+  'gemini-pro':    'openrouter/free',                          // Free — auto-picks best free model
+  'minimax':       'nvidia/nemotron-3-super-120b-a12b:free'   // Free — 262K ctx
 };
 
 // Trim old messages — keeps system prompt + recent history
@@ -108,7 +108,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     const orRequest = {
       model: orModel,
-      messages: trimMessages(messages),
+      messages: messages,
       temperature: temperature || 0.7,
       max_tokens: max_tokens || 2048,
       stream: useStream
