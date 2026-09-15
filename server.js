@@ -17,17 +17,17 @@ const OR_KEY  = process.env.OPENROUTER_API_KEY;
 const SHOW_REASONING = false; // Set to true to show <think> tags in output
 
 // Model mapping
-// Free models (no credits needed): deepseek/deepseek-v4-flash:free — 200 req/day
+// Free models (no credits needed): marked with :free suffix
 // Paid models draw from your credit balance
 const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'deepseek/deepseek-v4-flash:free',    // Free — use for casual chats
-  'gpt-4':         'deepseek/deepseek-v4-flash-0731',     // $0.05/M input — cheapest paid
-  'gpt-4-turbo':   'deepseek/deepseek-v4-flash',          // $0.07/M input — #1 RP model
-  'gpt-4o':        'deepseek/deepseek-v4-flash-0731',     // $0.05/M input — great value
-  'claude-3-opus': 'deepseek/deepseek-v4-pro',            // Premium — 1.65T params
-  'claude-3-sonnet':'deepseek/deepseek-r1:free',                // Reasoning model
-  'gemini-pro':    'deepseek/deepseek-v4-flash:free',     // Free fallback
-  'minimax':       'deepseek/deepseek-v4-flash:free'      // Free fallback
+  'gpt-3.5-turbo': 'deepseek/deepseek-r1:free',            // Free — R1 full 671B model
+  'gpt-4':         'deepseek/deepseek-chat-v3-0324:free',   // Free — DeepSeek V3
+  'gpt-4-turbo':   'deepseek/deepseek-v4-flash-0731',       // Paid — cheapest, great RP
+  'gpt-4o':        'deepseek/deepseek-v4-flash',            // Paid — #1 RP model globally
+  'claude-3-opus': 'deepseek/deepseek-v4-pro',              // Paid — 1.65T premium
+  'claude-3-sonnet':'deepseek/deepseek-r1',                 // Paid — reasoning
+  'gemini-pro':    'deepseek/deepseek-r1:free',             // Free — R1 full 671B model
+  'minimax':       'deepseek/deepseek-chat-v3-0324:free'    // Free — DeepSeek V3
 };
 
 // Trim old messages — keeps system prompt + recent history
@@ -140,11 +140,16 @@ app.post('/v1/chat/completions', async (req, res) => {
             const wait = retryAfter || delay * Math.pow(2, i);
             console.warn(`${status} — retrying in ${wait}ms (attempt ${i + 1}/${retries})`);
             await new Promise(r => setTimeout(r, wait));
-          } else throw err;
+          } else {
+            console.error(`OpenRouter error ${status} for model: ${orModel}`);
+            console.error('Response:', JSON.stringify(err.response?.data || {}));
+            throw err;
+          }
         }
       }
     };
 
+    console.log(`→ Sending to OpenRouter: ${orModel} (from client model: ${model})`);
     const response = await orFetch();
 
     if (stream) {
@@ -153,7 +158,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       res.setHeader('Connection', 'keep-alive');
 
       let buffer = '', reasoningStarted = false, charCount = 0, streamDone = false;
-      const MAX_CHARS = 4000; // ~1000 tokens — cuts off before any runaway builds
+      const MAX_CHARS = 10000; // ~2500 tokens / ~1800 words — full RP responses without runaway
 
       response.data.on('data', (chunk) => {
         buffer += chunk.toString();
