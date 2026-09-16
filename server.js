@@ -26,12 +26,12 @@ const MODEL_MAPPING = {
   'gpt-4o':        'deepseek/deepseek-v4-flash',              // Paid — #1 RP model globally
   'claude-3-opus': 'deepseek/deepseek-v4-pro',                // Paid — 1.65T premium
   'claude-3-sonnet':'deepseek/deepseek-r1',                   // Paid — reasoning
-  'gemini-pro':    'openrouter/free',                          // Free — auto-picks best free model
+  'gemini-pro':    'thinkingmachines/inkling-small:free',     // Free — 1M ctx
   'minimax':       'nvidia/nemotron-3-super-120b-a12b:free'   // Free — 262K ctx
 };
 
 // Trim old messages — keeps system prompt + recent history
-const trimMessages = (messages, maxTokens = 32000) => {
+const trimMessages = (messages, maxTokens = 40000) => {
   const estimate = msgs => msgs.reduce((sum, m) => sum + Math.ceil((m.content || '').length / 4), 0);
   if (estimate(messages) <= maxTokens) return messages;
   const system = messages.filter(m => m.role === 'system');
